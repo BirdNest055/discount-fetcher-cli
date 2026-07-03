@@ -25,3 +25,5 @@
 [2026-07-03 18:40:05 +0000]   Writing to DB: aldi.db
 [2026-07-03 18:40:05 +0000]   Commit complete.
 [2026-07-03 18:40:05 +0000] OK — fetched 175 offerings, 173 new products
+[2026-07-03 19:17:14 +0000] Mode: expiry
+[2026-07-03 19:17:14 +0000] NOT DUE — latest pub 'kw27-26-op-mp' (29.06. – 04.07.2026) is valid until 2026-07-04. Today is 2026-07-03. Will fetch after expiry.
