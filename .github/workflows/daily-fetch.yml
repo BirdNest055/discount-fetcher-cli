@@ -46,12 +46,12 @@ jobs:
       - name: Install dependency
         run: pip install -r requirements.txt
 
-      - name: Run auto-fetch
+      - name: Run auto-fetch (force re-fetch this once to pick up new schema columns)
         id: fetch
         continue-on-error: true   # we want the email to send even on failure
         run: |
           set +e
-          output=$(python aldi-cli.py --db aldi.db auto-fetch --log-file aldi.log 2>&1)
+          output=$(python aldi-cli.py --db aldi.db auto-fetch --force --log-file aldi.log 2>&1)
           exit_code=$?
           echo "$output"
           # The CLI prints the status on the last line: fetched | skipped-existing | error

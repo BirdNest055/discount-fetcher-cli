@@ -456,7 +456,36 @@ def open_db(path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON;")
     migrate_legacy_schema(conn)
     conn.executescript(SCHEMA)
+    add_missing_columns(conn)
     return conn
+
+
+def add_missing_columns(conn: sqlite3.Connection) -> None:
+    """Add columns that may be missing from older DBs (in-place ALTER TABLE).
+    This lets us evolve the schema without re-fetching everything."""
+    # Map (table, column) -> DDL for the column (without the column name prefix)
+    # Only includes columns added AFTER the initial schema.
+    new_columns = [
+        ("publications", "valid_dates",      "TEXT"),
+        ("publications", "valid_date_start", "TEXT"),
+        ("publications", "valid_date_end",   "TEXT"),
+        ("product_offerings", "brand",                    "TEXT"),
+        ("product_offerings", "discounted_price",         "TEXT"),
+        ("product_offerings", "discounted_price_numeric", "REAL"),
+        ("product_offerings", "webshop_url",              "TEXT"),
+    ]
+    for table, column, ddl in new_columns:
+        # Check if the column already exists
+        cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if not cols:
+            continue  # table doesn't exist yet (CREATE TABLE will handle it)
+        existing = {c[1] for c in cols}
+        if column not in existing:
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+            except sqlite3.OperationalError:
+                pass  # column may have been added by a concurrent call
+    conn.commit()
 
 
 def migrate_legacy_schema(conn: sqlite3.Connection) -> None:
