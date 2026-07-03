@@ -463,8 +463,6 @@ def open_db(path: str) -> sqlite3.Connection:
 def add_missing_columns(conn: sqlite3.Connection) -> None:
     """Add columns that may be missing from older DBs (in-place ALTER TABLE).
     This lets us evolve the schema without re-fetching everything."""
-    # Map (table, column) -> DDL for the column (without the column name prefix)
-    # Only includes columns added AFTER the initial schema.
     new_columns = [
         ("publications", "valid_dates",      "TEXT"),
         ("publications", "valid_date_start", "TEXT"),
@@ -475,17 +473,25 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         ("product_offerings", "webshop_url",              "TEXT"),
     ]
     for table, column, ddl in new_columns:
-        # Check if the column already exists
         cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
         if not cols:
-            continue  # table doesn't exist yet (CREATE TABLE will handle it)
+            print(f"[migrate] table {table} does not exist yet — skipping", file=sys.stderr)
+            continue
         existing = {c[1] for c in cols}
         if column not in existing:
             try:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
-            except sqlite3.OperationalError:
-                pass  # column may have been added by a concurrent call
+                print(f"[migrate] added column {table}.{column}", file=sys.stderr)
+            except sqlite3.OperationalError as e:
+                print(f"[migrate] could not add {table}.{column}: {e}", file=sys.stderr)
     conn.commit()
+    # Verify
+    for table, column, _ in new_columns:
+        cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if cols:
+            existing = {c[1] for c in cols}
+            if column not in existing:
+                print(f"[migrate] WARNING: {table}.{column} still missing after migration!", file=sys.stderr)
 
 
 def migrate_legacy_schema(conn: sqlite3.Connection) -> None:
