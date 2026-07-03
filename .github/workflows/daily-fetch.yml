@@ -1,34 +1,45 @@
 name: Daily ALDI fetch
 
-# The cron fires once a day at a fixed time (12:00 UTC). The job itself
-# runs for ~30 seconds — no sleep, no wasted Actions minutes. Randomness
-# in fetch timing comes from the cron schedule itself, not from sleeping
-# inside the job. To shift the fetch window, just change the cron expression.
+# The cron fires once a day at 12:00 UTC. The CLI runs in "expiry" mode by
+# default: it only fetches a new publication when the latest one in the DB
+# has expired (valid_date_end < today). When the current week is still
+# valid, the run returns "not-due" and NO email is sent (no daily spam).
 #
-# Examples:
-#   '0 12 * * *'  → 12:00 UTC daily
-#   '30 13 * * *' → 13:30 UTC daily
-#   '0 6,18 * * *' → twice daily (06:00 and 18:00 UTC)
+# Emails are only sent when:
+#   - A new week was fetched (status=fetched)
+#   - An error occurred (status=error)
+#   - The fetch step failed (job.status != success)
+#
+# To force a fetch even when not expired (e.g. for testing), trigger the
+# workflow manually with the "force" input set to true.
 #
 # EMAIL NOTIFICATIONS (optional):
-#   To get an email every time this runs (with duration + result + DB summary),
-#   set two repository secrets:
+#   Set two repository secrets to enable email:
 #     1. RESEND_API_KEY  — get one free at https://resend.com (100 emails/day free)
 #     2. NOTIFY_EMAIL    — the email address to send notifications to
-#   If either secret is missing, the email step is skipped silently.
 
 on:
   schedule:
     - cron: '0 12 * * *'
-  workflow_dispatch:  # allows manual trigger from the Actions tab
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force re-fetch even if current week has not expired'
+        type: boolean
+        default: false
+      mode:
+        description: 'Fetch mode (expiry = only after current pub expires)'
+        type: choice
+        options: [expiry, daily, manual]
+        default: expiry
 
 permissions:
-  contents: write  # needed to commit the updated aldi.db back to the repo
+  contents: write
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 5   # the actual fetch takes ~30s; 5min is a safe ceiling
+    timeout-minutes: 5
 
     steps:
       - name: Record start time
@@ -46,15 +57,31 @@ jobs:
       - name: Install dependency
         run: pip install -r requirements.txt
 
+      - name: Resolve fetch options
+        id: opts
+        run: |
+          # Default (scheduled) run: expiry mode, no force
+          MODE="expiry"
+          FORCE=""
+          # Manual dispatch: use the inputs
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ github.event.inputs.mode }}"
+            if [ "${{ github.event.inputs.force }}" = "true" ]; then
+              FORCE="--force"
+            fi
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "force=$FORCE" >> "$GITHUB_OUTPUT"
+          echo "Resolved: mode=$MODE force=$FORCE"
+
       - name: Run auto-fetch
         id: fetch
-        continue-on-error: true   # we want the email to send even on failure
+        continue-on-error: true
         run: |
           set +e
-          output=$(python aldi-cli.py --db aldi.db auto-fetch --log-file aldi.log 2>&1)
+          output=$(python aldi-cli.py --db aldi.db auto-fetch ${{ steps.opts.outputs.force }} --mode ${{ steps.opts.outputs.mode }} --log-file aldi.log 2>&1)
           exit_code=$?
           echo "$output"
-          # The CLI prints the status on the last line: fetched | skipped-existing | error
           last_line=$(echo "$output" | tail -1 | tr -d '[:space:]')
           echo "result=$last_line" >> "$GITHUB_OUTPUT"
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
@@ -259,6 +286,14 @@ jobs:
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - START_TIME))
 
+          # Skip email entirely when the current week has NOT expired yet.
+          # This is the "no spam" path: the cron runs daily, but you only
+          # get an email when there's actually something to report.
+          if [ "$FETCH_RESULT" = "not-due" ] && [ "$JOB_STATUS" = "success" ]; then
+            echo "📧 Email skipped — current week is still valid (not-due). No spam."
+            exit 0
+          fi
+
           # Determine status emoji + label
           case "$JOB_STATUS" in
             success) EMOJI="✅"; LABEL="succeeded" ;;
@@ -271,6 +306,7 @@ jobs:
           case "$FETCH_RESULT" in
             fetched)          RESULT_LABEL="📥 Fetched new week" ;;
             skipped-existing) RESULT_LABEL="⏭️  Skipped (week already in DB)" ;;
+            not-due)          RESULT_LABEL="⏰ Not due yet (current week still valid)" ;;
             error)            RESULT_LABEL="⚠️ Error during fetch" ;;
             "")               RESULT_LABEL="(no result — fetch step may have failed)" ;;
             *)                RESULT_LABEL="$FETCH_RESULT" ;;

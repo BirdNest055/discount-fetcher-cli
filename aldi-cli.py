@@ -1389,14 +1389,87 @@ def next_random_time(hour_start: int, hour_end: int,
     return target
 
 
-def auto_fetch_once(url: str | None, db_path: str, log_file: str | None,
-                    with_images: bool, img_dir: str,
-                    dry_run: bool = False, force: bool = False) -> str:
-    """One iteration of the auto-fetch logic. Returns a status string:
-       'fetched', 'skipped-existing', 'dry-run-skip', 'dry-run-fetch', or 'error'.
+def _latest_publication_expiry(db_path: str) -> tuple[str | None, str | None, str | None]:
+    """Return (slug, valid_date_end, valid_dates) of the most recent publication
+    in the DB by valid_date_start. Returns (None, None, None) if no pubs."""
+    if not os.path.exists(db_path):
+        return None, None, None
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            """SELECT slug, valid_date_end, valid_dates
+               FROM publications
+               WHERE valid_date_end IS NOT NULL
+               ORDER BY valid_date_start DESC
+               LIMIT 1"""
+        ).fetchone()
+        if row:
+            return row[0], row[1], row[2]
+    except sqlite3.OperationalError:
+        pass  # table doesn't exist yet
+    finally:
+        conn.close()
+    return None, None, None
 
-    If `force` is True, re-fetch even if the publication_id is already in the DB
-    (useful when ALDI publishes a partial week early and fills it in later)."""
+
+def auto_fetch_once(
+    url: str | None,
+    db_path: str,
+    log_file: str | None,
+    with_images: bool,
+    img_dir: str,
+    dry_run: bool = False,
+    force: bool = False,
+    mode: str = "expiry",
+) -> str:
+    """One iteration of the auto-fetch logic. Returns a status string:
+
+       'fetched'           — new publication was fetched
+       'skipped-existing'  — publication already in DB (mode=daily/force off)
+       'not-due'           — current pub hasn't expired yet (mode=expiry)
+       'dry-run-fetch'     — dry run, would have fetched
+       'error'             — error occurred
+
+    Modes:
+      daily   — always check for new publications (fetch if new id detected)
+      expiry  — only fetch when the latest pub's valid_date_end has passed.
+                Default. Prevents email spam: when the current week is still
+                valid, returns 'not-due' without fetching or emailing.
+      manual  — same as daily, but intended for manual triggers (no schedule)
+    """
+    _log(f"Mode: {mode}", log_file)
+
+    # --- Expiry check (mode=expiry only) ---
+    if mode == "expiry" and not force:
+        slug, valid_end, valid_dates = _latest_publication_expiry(db_path)
+        if valid_end:
+            try:
+                end_date = datetime.strptime(valid_end, "%Y-%m-%d").date()
+                today = datetime.now().date()
+                if today <= end_date:
+                    _log(
+                        f"NOT DUE — latest pub '{slug}' ({valid_dates}) "
+                        f"is valid until {valid_end}. Today is {today.isoformat()}. "
+                        f"Will fetch after expiry.",
+                        log_file,
+                    )
+                    return "not-due"
+                else:
+                    _log(
+                        f"DUE — latest pub '{slug}' ({valid_dates}) expired on {valid_end}. "
+                        f"Today is {today.isoformat()}. Checking for new week...",
+                        log_file,
+                    )
+            except ValueError:
+                _log(
+                    f"WARNING: could not parse valid_date_end '{valid_end}' as ISO date; "
+                    f"proceeding with fetch check",
+                    log_file,
+                )
+        else:
+            _log("No previous publication with known expiry — fetching first week", log_file)
+
+    # --- Discover current publication ---
     _log("Resolving current prospectus URL...", log_file)
     try:
         current_url = discover_current_url(url)
@@ -1455,7 +1528,7 @@ def cmd_auto_fetch(args):
     status = auto_fetch_once(
         url=args.url, db_path=args.db, log_file=args.log_file,
         with_images=args.with_images, img_dir=args.out, dry_run=args.dry_run,
-        force=args.force,
+        force=args.force, mode=args.mode,
     )
     print(status)
 
@@ -1486,7 +1559,7 @@ def cmd_daemon(args):
             auto_fetch_once(
                 url=args.url, db_path=args.db, log_file=args.log_file,
                 with_images=args.with_images, img_dir=args.out,
-                dry_run=args.dry_run, force=args.force,
+                dry_run=args.dry_run, force=args.force, mode=args.mode,
             )
         except Exception as e:
             _log(f"ERROR in daily run: {e}", args.log_file)
@@ -1649,6 +1722,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Log what would happen without fetching")
     pa.add_argument("--force", action="store_true",
                     help="Re-fetch even if the publication_id is already in the DB")
+    pa.add_argument("--mode", default="expiry", choices=["daily", "expiry", "manual"],
+                    help="Fetch mode: expiry (default, only fetch after current pub expires), "
+                         "daily (always check for new week), manual (same as daily)")
     pa.set_defaults(func=cmd_auto_fetch)
 
     pdm = sub.add_parser("daemon",
@@ -1665,6 +1741,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Log what would happen without fetching")
     pdm.add_argument("--force", action="store_true",
                      help="Re-fetch even if the publication_id is already in the DB")
+    pdm.add_argument("--mode", default="expiry", choices=["daily", "expiry", "manual"],
+                     help="Fetch mode: expiry (default), daily, manual")
     pdm.set_defaults(func=cmd_daemon)
 
     pic = sub.add_parser("install-cron",

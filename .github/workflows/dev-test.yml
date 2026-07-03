@@ -1,0 +1,82 @@
+name: Dev test fetch
+
+# This workflow is for TESTING changes on the dev branch.
+# It uses a separate DB file (aldi-dev.db) so it never touches production data.
+# It only runs on manual dispatch — never on a schedule.
+#
+# When a dev-test run succeeds, merge dev → main to promote to production.
+
+on:
+  workflow_dispatch:  # manual trigger only — never runs automatically
+  push:
+    branches: [dev]   # also runs on push to dev so you get feedback
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependency
+        run: pip install -r requirements.txt
+
+      - name: Run auto-fetch against dev DB
+        id: fetch
+        continue-on-error: true
+        run: |
+          set +e
+          # Use a separate DB file so we never touch production data
+          output=$(python aldi-cli.py --db aldi-dev.db auto-fetch --force --log-file aldi-dev.log 2>&1)
+          exit_code=$?
+          echo "$output"
+          last_line=$(echo "$output" | tail -1 | tr -d '[:space:]')
+          echo "result=$last_line" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit $exit_code
+
+      - name: Show dev DB stats
+        if: always()
+        run: |
+          if [ -f aldi-dev.db ]; then
+            echo "=== Dev DB stats ==="
+            python3 -c "
+          import sqlite3
+          c = sqlite3.connect('aldi-dev.db')
+          for t in ['publications','products','product_offerings','product_brands']:
+              try:
+                  n = c.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0]
+                  print(f'  {t}: {n}')
+              except: pass
+          print()
+          print('Publications:')
+          for r in c.execute('SELECT slug, valid_dates FROM publications ORDER BY valid_date_start'):
+              print(f'  {r[0]}  {r[1] or \"(no dates)\"}')
+          "
+          else
+            echo "No dev DB created (fetch may have failed before DB write)"
+          fi
+
+      - name: Commit dev DB + log (to dev branch only)
+        if: steps.fetch.outputs.exit_code == '0'
+        run: |
+          git config user.name  "aldi-bot"
+          git config user.email "aldi-bot@users.noreply.github.com"
+          [ -f aldi-dev.db ]  && git add aldi-dev.db
+          [ -f aldi-dev.log ] && git add -f aldi-dev.log
+          if git diff --cached --quiet; then
+            echo "No changes."
+          else
+            git commit -m "dev: test fetch $(date -u +%Y-%m-%d)"
+            git push
+          fi
