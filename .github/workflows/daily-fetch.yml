@@ -1,10 +1,17 @@
 name: Daily ALDI fetch
 
+# The cron fires once a day at a fixed time (12:00 UTC). The job itself
+# runs for ~30 seconds — no sleep, no wasted Actions minutes. Randomness
+# in fetch timing comes from the cron schedule itself, not from sleeping
+# inside the job. To shift the fetch window, just change the cron expression.
+#
+# Examples:
+#   '0 12 * * *'  → 12:00 UTC daily
+#   '30 13 * * *' → 13:30 UTC daily
+#   '0 6,18 * * *' → twice daily (06:00 and 18:00 UTC)
+
 on:
   schedule:
-    # 12:00 UTC every day. The CLI's --jitter 0-3 then sleeps a random
-    # 0-3 hours before fetching, so the actual fetch happens between
-    # 12:00 and 15:00 UTC. Kept under the 6h Actions job limit.
     - cron: '0 12 * * *'
   workflow_dispatch:  # allows manual trigger from the Actions tab
 
@@ -14,7 +21,7 @@ permissions:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5   # the actual fetch takes ~30s; 5min is a safe ceiling
 
     steps:
       - name: Checkout
@@ -28,19 +35,17 @@ jobs:
       - name: Install dependency
         run: pip install -r requirements.txt
 
-      - name: Run auto-fetch (with random 0-3h jitter)
+      - name: Run auto-fetch (no jitter — the cron schedule handles timing)
         run: |
           python aldi-cli.py \
             --db aldi.db \
             auto-fetch \
-            --jitter 0-3 \
             --log-file aldi.log
 
       - name: Commit updated DB + log
         run: |
           git config user.name  "aldi-bot"
           git config user.email "aldi-bot@users.noreply.github.com"
-          # Add only files that exist (aldi.log is created by the run above)
           [ -f aldi.db ]  && git add aldi.db
           [ -f aldi.log ] && git add aldi.log
           if git diff --cached --quiet; then
@@ -49,4 +54,3 @@ jobs:
             git commit -m "auto: fetched new week $(date -u +%Y-%m-%d)"
             git push
           fi
-
