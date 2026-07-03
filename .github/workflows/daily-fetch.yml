@@ -1,0 +1,48 @@
+name: Daily ALDI fetch
+
+on:
+  schedule:
+    # 12:00 UTC every day. The CLI's --jitter 0-6 then sleeps a random
+    # 0-6 hours before fetching, so the actual fetch happens at a random
+    # time between 12:00 and 18:00 UTC.
+    - cron: '0 12 * * *'
+  workflow_dispatch:  # allows manual trigger from the Actions tab
+
+permissions:
+  contents: write  # needed to commit the updated aldi.db back to the repo
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependency
+        run: pip install -r requirements.txt
+
+      - name: Run auto-fetch (with random 0-6h jitter)
+        run: |
+          python aldi-cli.py auto-fetch \
+            --db aldi.db \
+            --jitter 0-6 \
+            --log-file aldi.log
+
+      - name: Commit updated DB + log
+        run: |
+          git config user.name  "aldi-bot"
+          git config user.email "aldi-bot@users.noreply.github.com"
+          git add aldi.db aldi.log
+          if git diff --cached --quiet; then
+            echo "No changes — week already in DB."
+          else
+            git commit -m "auto: fetched new week $(date -u +%Y-%m-%d)"
+            git push
+          fi

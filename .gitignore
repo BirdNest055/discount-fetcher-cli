@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# Downloaded images (we only persist text data in the DB, never binaries)
+aldi-images/
+download/
+
+# Local logs (the GitHub Actions workflow tracks its own aldi.log in-repo)
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# OS
+Thumbs.db
