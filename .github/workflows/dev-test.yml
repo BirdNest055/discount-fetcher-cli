@@ -34,16 +34,113 @@ jobs:
       - name: Run auto-fetch against dev DB
         id: fetch
         continue-on-error: true
+        env:
+          ALDI_STATE_FILE: aldi-dev.state.json
         run: |
           set +e
           # Use a separate DB file so we never touch production data
-          output=$(python aldi-cli.py --db aldi-dev.db auto-fetch --force --log-file aldi-dev.log 2>&1)
+          # --force ensures we exercise the full fetch path even if the
+          # current week is already in the dev DB.
+          output=$(python aldi-cli.py --db aldi-dev.db auto-fetch --force --mode daily --log-file aldi-dev.log 2>&1)
           exit_code=$?
           echo "$output"
           last_line=$(echo "$output" | tail -1 | tr -d '[:space:]')
           echo "result=$last_line" >> "$GITHUB_OUTPUT"
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          # Surface the error line if present (for visibility in GHA logs)
+          error_line=$(echo "$output" | grep -E '^error\|' | tail -1 || true)
+          if [ -n "$error_line" ]; then
+            echo "::warning::Error surfaced: $error_line"
+          fi
           exit $exit_code
+
+      - name: Run error-handler smoke test
+        if: always()
+        run: |
+          echo "=== Error handler smoke test ==="
+          python3 << 'PYEOF'
+          import sys, os
+          sys.path.insert(0, '.')
+          from error_handler import (
+              AldiError, NetworkError, ParseError, StorageError,
+              ConfigurationError, RunState, load_state, save_state,
+              update_state_for_success, update_state_for_skip, update_state_for_error,
+              format_error_report, retry_network,
+              EXIT_SUCCESS, EXIT_NETWORK, EXIT_PARSE, EXIT_STORAGE,
+              EXIT_CONFIG, EXIT_UNKNOWN, EXIT_CIRCUIT_OPEN,
+              MAX_CONSECUTIVE_ERRORS,
+          )
+
+          # Test 1: Typed exceptions have correct exit codes
+          assert NetworkError("x").exit_code == EXIT_NETWORK
+          assert ParseError("x").exit_code == EXIT_PARSE
+          assert StorageError("x").exit_code == EXIT_STORAGE
+          assert ConfigurationError("x").exit_code == EXIT_CONFIG
+          print("✓ Typed exceptions have correct exit codes")
+
+          # Test 2: Error signatures are stable
+          e1 = NetworkError("HTTP 404", stage="discover")
+          e2 = NetworkError("HTTP 404", stage="discover")
+          e3 = NetworkError("HTTP 500", stage="discover")
+          assert e1.signature() == e2.signature(), "same errors should have same signature"
+          assert e1.signature() != e3.signature(), "different errors should have different signatures"
+          print("✓ Error signatures are stable")
+
+          # Test 3: Circuit breaker fires after MAX_CONSECUTIVE_ERRORS
+          state = RunState()
+          sig = e1.signature()
+          for i in range(1, MAX_CONSECUTIVE_ERRORS + 2):
+              notify, circuit_open = update_state_for_error(state, e1)
+              if i < MAX_CONSECUTIVE_ERRORS:
+                  assert notify, f"Run {i}: should notify (first occurrence or different error)"
+                  assert not circuit_open, f"Run {i}: circuit should be closed"
+              else:
+                  assert circuit_open, f"Run {i}: circuit should be open after {MAX_CONSECUTIVE_ERRORS} errors"
+              print(f"  Run {i}: notify={notify}, circuit_open={circuit_open}")
+
+          # Test 4: Recovery resets state
+          recovered = update_state_for_success(state)
+          assert recovered, "should report recovery"
+          assert state.consecutive_errors == 0
+          print("✓ Recovery resets state and reports transition")
+
+          # Test 5: retry_network exhausts attempts on persistent error
+          attempts = []
+          def failing():
+              attempts.append(1)
+              raise NetworkError("persistent", stage="test")
+          try:
+              retry_network(failing, max_attempts=2, backoff_seconds=[0, 0],
+                            stage="test", log_fn=lambda m: None)
+              assert False, "should have raised"
+          except NetworkError:
+              assert len(attempts) == 2, f"expected 2 attempts, got {len(attempts)}"
+          print("✓ retry_network respects max_attempts")
+
+          # Test 6: retry_network does NOT retry on non-retryable errors
+          attempts2 = []
+          def parse_fail():
+              attempts2.append(1)
+              raise ParseError("won't fix itself", stage="test")
+          try:
+              retry_network(parse_fail, max_attempts=3, backoff_seconds=[0, 0, 0],
+                            stage="test", log_fn=lambda m: None)
+              assert False, "should have raised"
+          except ParseError:
+              assert len(attempts2) == 1, f"ParseError should not retry, got {len(attempts2)} attempts"
+          print("✓ retry_network does NOT retry non-retryable errors")
+
+          # Test 7: format_error_report includes all key info
+          err = NetworkError("test message", stage="test_stage")
+          report = format_error_report(err, include_traceback=False)
+          assert "network" in report
+          assert "test_stage" in report
+          assert "test message" in report
+          print("✓ Error report format is correct")
+
+          print()
+          print("All smoke tests passed.")
+          PYEOF
 
       - name: Show dev DB stats
         if: always()

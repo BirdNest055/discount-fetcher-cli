@@ -97,6 +97,18 @@ from urllib.parse import urljoin
 
 import requests
 
+# Error handling — typed exceptions, circuit breaker, retry, state file
+from error_handler import (
+    AldiError, NetworkError, ParseError, StorageError, ConfigurationError,
+    EXIT_SUCCESS, EXIT_NETWORK, EXIT_PARSE, EXIT_STORAGE, EXIT_CONFIG,
+    EXIT_UNKNOWN, EXIT_CIRCUIT_OPEN,
+    MAX_CONSECUTIVE_ERRORS,
+    RunState, load_state, save_state,
+    update_state_for_success, update_state_for_skip, update_state_for_error,
+    retry_network, wrap_network, wrap_parse, wrap_storage,
+    format_error_report, error_signature_for_workflow,
+)
+
 DEFAULT_DB = os.environ.get("ALDI_DB", "/home/z/my-project/download/aldi.db")
 DEFAULT_IMG_DIR = "/home/z/my-project/download/aldi-images"
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -155,15 +167,21 @@ def http() -> requests.Session:
 
 
 def get_html(url: str) -> str:
-    r = http().get(url, timeout=30)
-    r.raise_for_status()
+    r = wrap_network(lambda: http().get(url, timeout=30), stage="network:get_html")
+    if not r.ok:
+        raise NetworkError(f"HTTP {r.status_code} for {url}", stage="get_html")
     return r.text
 
 
 def get_json(url: str) -> Any:
-    r = http().get(url, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    r = wrap_network(lambda: http().get(url, timeout=30), stage="network:get_json")
+    if not r.ok:
+        raise NetworkError(f"HTTP {r.status_code} for {url}", stage="get_json")
+    try:
+        return r.json()
+    except Exception as e:
+        raise ParseError(f"Could not decode JSON from {url}: {e}",
+                         stage="get_json", cause=e) from e
 
 
 # --------------------------------------------------------------------------- #
@@ -177,8 +195,18 @@ def extract_publication_config(html: str) -> dict:
     """Pull the `var data = {...}` JSON blob out of the page HTML."""
     m = CONFIG_RE.search(html)
     if not m:
-        raise SystemExit("ERROR: could not find publication config in HTML")
-    return json.loads(m.group(1))
+        raise ParseError(
+            "Could not find publication config (`var data = {...}`) in HTML. "
+            "ALDI may have changed their page structure.",
+            stage="extract_publication_config",
+        )
+    try:
+        return json.loads(m.group(1))
+    except json.JSONDecodeError as e:
+        raise ParseError(
+            f"Publication config JSON is malformed: {e}",
+            stage="extract_publication_config", cause=e,
+        ) from e
 
 
 # --------------------------------------------------------------------------- #
@@ -628,7 +656,11 @@ def fetch_publication(url: str, db_path: str, with_images: bool = False,
             all_hotspots[spread] = []
 
     progress(f"Writing to DB: {db_path}")
-    conn = open_db(db_path)
+    try:
+        conn = open_db(db_path)
+    except Exception as e:
+        raise StorageError(f"Could not open DB at {db_path}: {type(e).__name__}: {e}",
+                           stage="fetch_publication:open_db", cause=e) from e
     now_iso = datetime.now(timezone.utc).isoformat()
     n_hotspots = 0
     n_offerings = 0
@@ -843,8 +875,16 @@ def fetch_publication(url: str, db_path: str, with_images: bool = False,
                                     (oid, k, str(v)),
                                 )
         progress("Commit complete.")
+    except Exception as e:
+        if e.__class__.__module__.startswith("sqlite3") or isinstance(e, OSError):
+            raise StorageError(f"DB write failed: {type(e).__name__}: {e}",
+                               stage="fetch_publication:write", cause=e) from e
+        raise  # re-raise anything else unchanged
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     if with_images:
         download_images(db_path, parsed.slug, img_dir, quality="at600",
@@ -1318,10 +1358,31 @@ def discover_current_url(explicit_url: str | None = None) -> str:
     """Resolve the current week's prospectus URL.
        - If explicit_url is given, use it (after following redirects).
        - Otherwise, follow the redirect from the landing page.
-    """
+       Network errors (connection, timeout, 5xx) are retried 3x with
+       exponential backoff. 4xx errors are NOT retried (they won't fix
+       themselves)."""
     src = explicit_url or LANDING_URL
-    r = http().get(src, timeout=30, allow_redirects=True)
-    r.raise_for_status()
+
+    def _do_get_and_check():
+        r = http().get(src, timeout=30, allow_redirects=True)
+        # 5xx = transient, raise NetworkError so retry_network catches it
+        if 500 <= r.status_code < 600:
+            raise NetworkError(f"HTTP {r.status_code} (server error) for {src}",
+                               stage="discover_current_url")
+        # 4xx = client error, NOT retryable — return response, caller checks .ok
+        return r
+
+    # Retry on network errors only (5s, 15s, 45s backoff)
+    r = retry_network(_do_get_and_check, max_attempts=3,
+                      stage="discover_current_url",
+                      log_fn=lambda m: _log(m))
+    if not r.ok:
+        # 4xx or other non-retryable HTTP error
+        raise NetworkError(
+            f"HTTP {r.status_code} fetching landing page {src}",
+            stage="discover_current_url",
+            retryable=False,
+        )
     final = r.url
     # Sanity check: must match the prospectus URL pattern
     if not URL_RE.match(final):
@@ -1329,20 +1390,28 @@ def discover_current_url(explicit_url: str | None = None) -> str:
         # (happens if the URL is already a /page/ URL). Try the explicit URL.
         if explicit_url and URL_RE.match(explicit_url):
             return explicit_url
-        raise SystemExit(f"Could not resolve a prospectus URL from {src!r} "
-                         f"(final: {final!r})")
+        raise ParseError(
+            f"Could not resolve a prospectus URL from {src!r} "
+            f"(final: {final!r}) — page structure may have changed",
+            stage="discover_current_url",
+        )
     return final
 
 
 def peek_publication_id(url: str) -> tuple[int, str] | None:
     """Lightweight check: fetch only the HTML page (no spreads/hotspots),
        extract the publication_id and slug from the config blob.
-       Returns (pub_id, slug) or None if the page has no config."""
+       Returns (pub_id, slug) or None if the page has no config.
+       Network/parse errors are caught and logged — caller treats as 'no peek'."""
     try:
         html = get_html(url)
         cfg = extract_publication_config(html)
         return (cfg.get("id"), cfg.get("slug"))
-    except Exception:
+    except AldiError as e:
+        _log(f"peek_publication_id: {e.category} error at {e.stage}: {e.message}")
+        return None
+    except Exception as e:
+        _log(f"peek_publication_id: unexpected error: {type(e).__name__}: {e}")
         return None
 
 
@@ -1428,7 +1497,8 @@ def auto_fetch_once(
        'skipped-existing'  — publication already in DB (mode=daily/force off)
        'not-due'           — current pub hasn't expired yet (mode=expiry)
        'dry-run-fetch'     — dry run, would have fetched
-       'error'             — error occurred
+       'error'             — error occurred (also raises AldiError for the
+                             caller to log/notify; status is set first)
 
     Modes:
       daily   — always check for new publications (fetch if new id detected)
@@ -1469,20 +1539,25 @@ def auto_fetch_once(
         else:
             _log("No previous publication with known expiry — fetching first week", log_file)
 
-    # --- Discover current publication ---
+    # --- Discover current publication (network, retried) ---
     _log("Resolving current prospectus URL...", log_file)
     try:
         current_url = discover_current_url(url)
-    except Exception as e:
-        _log(f"ERROR resolving URL: {e}", log_file)
-        return "error"
+    except AldiError as e:
+        _log(f"ERROR resolving URL [{e.category}@{e.stage}]: {e.message}", log_file)
+        raise  # let caller update state + exit with proper code
 
     _log(f"Current URL: {current_url}", log_file)
     _log("Peeking publication id (lightweight HTML fetch)...", log_file)
     peek = peek_publication_id(current_url)
     if not peek:
-        _log("ERROR: could not extract publication id from page config", log_file)
-        return "error"
+        err = ParseError(
+            "Could not extract publication id from page config — "
+            "ALDI may have changed their HTML structure",
+            stage="peek_publication_id",
+        )
+        _log(f"ERROR [{err.category}@{err.stage}]: {err.message}", log_file)
+        raise err
 
     pub_id, slug = peek
     _log(f"Discovered: pub_id={pub_id}  slug={slug}", log_file)
@@ -1508,13 +1583,28 @@ def auto_fetch_once(
         _log(f"OK — fetched {result.num_offerings} offerings, "
              f"{result.num_new_products} new products", log_file)
         return "fetched"
+    except AldiError:
+        # Already typed — just re-raise
+        raise
     except Exception as e:
-        _log(f"ERROR during fetch: {e}", log_file)
-        return "error"
+        # Wrap unknown errors as a generic AldiError so the state machine
+        # can categorize them.
+        # Try to classify based on context — fetch_publication does both
+        # network + storage, but most unknowns at this stage are likely storage
+        # (e.g. disk full, schema mismatch).
+        if e.__class__.__module__.startswith("sqlite3") or isinstance(e, OSError):
+            err = StorageError(f"{type(e).__name__}: {e}",
+                               stage="fetch_publication", cause=e)
+        else:
+            err = ParseError(f"Unexpected {type(e).__name__}: {e}",
+                             stage="fetch_publication", cause=e)
+        _log(f"ERROR [{err.category}@{err.stage}]: {err.message}", log_file)
+        raise err from e
 
 
 def cmd_auto_fetch(args):
-    """One-shot: discover current week, check DB, fetch if missing, exit."""
+    """One-shot: discover current week, check DB, fetch if missing, exit.
+    Returns an exit code (0=success, 10/20/30/40/50=typed error, 60=circuit-open)."""
     if args.jitter:
         h_start, h_end = parse_hour_range(args.jitter)
         target = next_random_time(h_start, h_end)
@@ -1525,22 +1615,70 @@ def cmd_auto_fetch(args):
              args.log_file)
         time.sleep(max(0, sleep_s))
 
-    status = auto_fetch_once(
-        url=args.url, db_path=args.db, log_file=args.log_file,
-        with_images=args.with_images, img_dir=args.out, dry_run=args.dry_run,
-        force=args.force, mode=args.mode,
-    )
+    # Load circuit-breaker state from disk (next to the DB by default)
+    state_path = os.environ.get("ALDI_STATE_FILE") or \
+        os.path.splitext(args.db)[0] + ".state.json"
+    state = load_state(state_path)
+
+    try:
+        status = auto_fetch_once(
+            url=args.url, db_path=args.db, log_file=args.log_file,
+            with_images=args.with_images, img_dir=args.out, dry_run=args.dry_run,
+            force=args.force, mode=args.mode,
+        )
+    except AldiError as e:
+        # Update state + persist
+        should_notify, circuit_open = update_state_for_error(state, e)
+        save_state(state, state_path)
+        # Emit a structured error report to stderr (and log file)
+        report = format_error_report(e)
+        _log(f"FAILURE REPORT:\n{report}", args.log_file)
+        # Emit machine-readable status for the GHA workflow
+        print(f"error|{e.category}|{e.stage}|{e.signature()}|"
+              f"{'notify' if should_notify else 'suppress'}|"
+              f"{'circuit-open' if circuit_open else 'circuit-closed'}",
+              file=sys.stderr)
+        sys.exit(e.exit_code)
+    except Exception as e:
+        # Unknown non-AldiError — wrap and exit
+        err = AldiError(f"Unexpected error: {type(e).__name__}: {e}",
+                        stage="cmd_auto_fetch", cause=e)
+        err.exit_code = EXIT_UNKNOWN
+        err.category = "unknown"
+        should_notify, circuit_open = update_state_for_error(state, err)
+        save_state(state, state_path)
+        _log(f"UNEXPECTED ERROR:\n{format_error_report(err)}", args.log_file)
+        sys.exit(EXIT_UNKNOWN)
+
+    # Success path — update state and exit 0
+    if status in ("not-due", "skipped-existing"):
+        update_state_for_skip(state, status)
+    else:
+        recovered = update_state_for_success(state)
+        if recovered:
+            _log("RECOVERY: previous error state cleared.", args.log_file)
+    save_state(state, state_path)
+
     print(status)
+    sys.exit(EXIT_SUCCESS)
 
 
 def cmd_daemon(args):
     """Long-running: each day, sleep until a random time in the window,
-       then run auto-fetch-once. Loops forever."""
+       then run auto-fetch-once. Loops forever.
+
+    ANTI-LOOP: if MAX_CONSECUTIVE_ERRORS (default 3) identical errors occur
+    in a row, the daemon EXITS so systemd can restart it (RestartSec=60).
+    This prevents an infinite error loop."""
     h_start, h_end = parse_hour_range(args.hours)
     _log(f"Daemon starting. Daily window: {h_start:02d}:00-{h_end:02d}:00 "
          f"local time. DB: {args.db}", args.log_file)
     _log(f"URL source: {args.url or LANDING_URL + ' (auto-discover via redirect)'}",
          args.log_file)
+
+    state_path = os.environ.get("ALDI_STATE_FILE") or \
+        os.path.splitext(args.db)[0] + ".state.json"
+    state = load_state(state_path)
 
     while True:
         target = next_random_time(h_start, h_end)
@@ -1556,13 +1694,39 @@ def cmd_daemon(args):
 
         _log("Wake — starting daily check.", args.log_file)
         try:
-            auto_fetch_once(
+            status = auto_fetch_once(
                 url=args.url, db_path=args.db, log_file=args.log_file,
                 with_images=args.with_images, img_dir=args.out,
                 dry_run=args.dry_run, force=args.force, mode=args.mode,
             )
+            if status in ("not-due", "skipped-existing"):
+                update_state_for_skip(state, status)
+            else:
+                update_state_for_success(state)
+            save_state(state, state_path)
+        except AldiError as e:
+            should_notify, circuit_open = update_state_for_error(state, e)
+            save_state(state, state_path)
+            _log(f"ERROR in daily run [{e.category}@{e.stage}]: {e.message}",
+                 args.log_file)
+            _log(format_error_report(e), args.log_file)
+            if circuit_open:
+                _log(f"CIRCUIT BREAKER OPEN: {state.consecutive_errors} "
+                     f"consecutive identical errors. Daemon exiting for restart.",
+                     args.log_file)
+                return  # exit — systemd will restart with RestartSec=60
         except Exception as e:
-            _log(f"ERROR in daily run: {e}", args.log_file)
+            err = AldiError(f"Unexpected: {type(e).__name__}: {e}",
+                            stage="daemon_loop", cause=e)
+            err.exit_code = EXIT_UNKNOWN
+            err.category = "unknown"
+            should_notify, circuit_open = update_state_for_error(state, err)
+            save_state(state, state_path)
+            _log(f"UNEXPECTED ERROR: {format_error_report(err)}", args.log_file)
+            if circuit_open:
+                _log("CIRCUIT BREAKER OPEN — daemon exiting for restart.",
+                     args.log_file)
+                return
 
         # Avoid immediately re-entering the loop and recomputing today's slot
         time.sleep(60)
@@ -1768,9 +1932,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Main entry point. Returns the exit code (0=success, 10/20/30/40/50/60=error).
+    cmd_auto_fetch handles its own sys.exit(); other subcommands return None
+    which we treat as success."""
     args = build_parser().parse_args(argv)
-    args.func(args)
-    return 0
+    # cmd_auto_fetch / cmd_daemon call sys.exit() themselves
+    # Other subcommands return None — treat as success
+    rc = args.func(args)
+    return rc if isinstance(rc, int) else 0
 
 
 if __name__ == "__main__":

@@ -26,3 +26,61 @@
 [2026-07-03 19:15:15 +0000]   Writing to DB: aldi-dev.db
 [2026-07-03 19:15:15 +0000]   Commit complete.
 [2026-07-03 19:15:15 +0000] OK — fetched 175 offerings, 173 new products
+[2026-07-03 19:57:55 +0000] Mode: expiry
+[2026-07-03 19:57:55 +0000] Resolving current prospectus URL...
+[2026-07-03 19:57:56 +0000] Current URL: https://prospekt.aldi-sued.de/kw27-26-op-mp/
+[2026-07-03 19:57:56 +0000] Peeking publication id (lightweight HTML fetch)...
+[2026-07-03 19:57:56 +0000] Discovered: pub_id=3167415  slug=kw27-26-op-mp
+[2026-07-03 19:57:56 +0000] FORCE — re-fetching publication 3167415 (kw27-26-op-mp) even though it exists
+[2026-07-03 19:57:56 +0000] NEW week detected — fetching https://prospekt.aldi-sued.de/kw27-26-op-mp/
+[2026-07-03 19:57:56 +0000]   Fetching page: https://prospekt.aldi-sued.de/kw27-26-op-mp/page/1
+[2026-07-03 19:57:56 +0000]   Fetching spreads: https://prospekt.aldi-sued.de/kw27-26-op-mp/spreads.json?version=ZmM0ZTNkYjdlZGJkOWEwYTUxMWJlZGFhNmE0NjFmMWMyMWNkN2NiNA==&page=1
+[2026-07-03 19:57:56 +0000]   Publication has 31 pages -> 16 spreads
+[2026-07-03 19:57:56 +0000]     [1/16] spread 1
+[2026-07-03 19:57:56 +0000]     [2/16] spread 2-3
+[2026-07-03 19:57:56 +0000]     [3/16] spread 4-5
+[2026-07-03 19:57:56 +0000]     [4/16] spread 6-7
+[2026-07-03 19:57:56 +0000]     [5/16] spread 8-9
+[2026-07-03 19:57:56 +0000]     [6/16] spread 10-11
+[2026-07-03 19:57:56 +0000]     [7/16] spread 12-13
+[2026-07-03 19:57:56 +0000]     [8/16] spread 14-15
+[2026-07-03 19:57:56 +0000]     [9/16] spread 16-17
+[2026-07-03 19:57:56 +0000]     [10/16] spread 18-19
+[2026-07-03 19:57:56 +0000]     [11/16] spread 20-21
+[2026-07-03 19:57:56 +0000]     [12/16] spread 22-23
+[2026-07-03 19:57:56 +0000]     [13/16] spread 24-25
+[2026-07-03 19:57:56 +0000]     [14/16] spread 26-27
+[2026-07-03 19:57:56 +0000]     [15/16] spread 28-29
+[2026-07-03 19:57:56 +0000]     [16/16] spread 30-31
+[2026-07-03 19:57:56 +0000]   Writing to DB: aldi-dev.db
+[2026-07-03 19:57:56 +0000]   Commit complete.
+[2026-07-03 19:57:56 +0000] OK — fetched 175 offerings, 0 new products
+[2026-07-04 20:54:26 +0000] Mode: daily
+[2026-07-04 20:54:26 +0000] Resolving current prospectus URL...
+[2026-07-04 20:54:27 +0000] Current URL: https://prospekt.aldi-sued.de/kw28-26-op-mp/
+[2026-07-04 20:54:27 +0000] Peeking publication id (lightweight HTML fetch)...
+[2026-07-04 20:54:27 +0000] Discovered: pub_id=3188193  slug=kw28-26-op-mp
+[2026-07-04 20:54:27 +0000] NEW week detected — fetching https://prospekt.aldi-sued.de/kw28-26-op-mp/
+[2026-07-04 20:54:27 +0000]   Fetching page: https://prospekt.aldi-sued.de/kw28-26-op-mp/page/1
+[2026-07-04 20:54:27 +0000]   Fetching spreads: https://prospekt.aldi-sued.de/kw28-26-op-mp/spreads.json?version=N2MwNTc2NzU5YzEyNmI1NTQ0NTA2MjU4MjQ5NWVmODc2MWQ4YWVhZQ==&page=1
+[2026-07-04 20:54:27 +0000]   Publication has 32 pages -> 17 spreads
+[2026-07-04 20:54:27 +0000]     [1/17] spread 1
+[2026-07-04 20:54:27 +0000]     [2/17] spread 2-3
+[2026-07-04 20:54:27 +0000]     [3/17] spread 4-5
+[2026-07-04 20:54:28 +0000]     [4/17] spread 6-7
+[2026-07-04 20:54:28 +0000]     [5/17] spread 8-9
+[2026-07-04 20:54:28 +0000]     [6/17] spread 10-11
+[2026-07-04 20:54:28 +0000]     [7/17] spread 12-13
+[2026-07-04 20:54:28 +0000]     [8/17] spread 14-15
+[2026-07-04 20:54:28 +0000]     [9/17] spread 16-17
+[2026-07-04 20:54:28 +0000]     [10/17] spread 18-19
+[2026-07-04 20:54:29 +0000]     [11/17] spread 20-21
+[2026-07-04 20:54:29 +0000]     [12/17] spread 22-23
+[2026-07-04 20:54:29 +0000]     [13/17] spread 24-25
+[2026-07-04 20:54:29 +0000]     [14/17] spread 26-27
+[2026-07-04 20:54:29 +0000]     [15/17] spread 28-29
+[2026-07-04 20:54:29 +0000]     [16/17] spread 30-31
+[2026-07-04 20:54:29 +0000]     [17/17] spread 32
+[2026-07-04 20:54:30 +0000]   Writing to DB: aldi-dev.db
+[2026-07-04 20:54:30 +0000]   Commit complete.
+[2026-07-04 20:54:30 +0000] OK — fetched 164 offerings, 159 new products

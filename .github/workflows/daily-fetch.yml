@@ -77,30 +77,51 @@ jobs:
       - name: Run auto-fetch
         id: fetch
         continue-on-error: true
+        env:
+          ALDI_STATE_FILE: aldi.state.json
         run: |
           set +e
+          # The CLI emits a structured line "error|<cat>|<stage>|<sig>|<notify|suppress>|<circuit>" on failure
           output=$(python aldi-cli.py --db aldi.db auto-fetch ${{ steps.opts.outputs.force }} --mode ${{ steps.opts.outputs.mode }} --log-file aldi.log 2>&1)
           exit_code=$?
           echo "$output"
           last_line=$(echo "$output" | tail -1 | tr -d '[:space:]')
+          # Capture structured error line (starts with "error|")
+          error_line=$(echo "$output" | grep -E '^error\|' | tail -1 || true)
           echo "result=$last_line" >> "$GITHUB_OUTPUT"
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          echo "error_line=$error_line" >> "$GITHUB_OUTPUT"
+          # Parse error fields for the email-dedup decision
+          if [ -n "$error_line" ]; then
+            error_category=$(echo "$error_line" | cut -d'|' -f2)
+            error_stage=$(echo "$error_line" | cut -d'|' -f3)
+            error_sig=$(echo "$error_line" | cut -d'|' -f4)
+            notify_flag=$(echo "$error_line" | cut -d'|' -f5)
+            circuit_flag=$(echo "$error_line" | cut -d'|' -f6)
+            echo "error_category=$error_category" >> "$GITHUB_OUTPUT"
+            echo "error_stage=$error_stage" >> "$GITHUB_OUTPUT"
+            echo "error_sig=$error_sig" >> "$GITHUB_OUTPUT"
+            echo "notify_flag=$notify_flag" >> "$GITHUB_OUTPUT"
+            echo "circuit_flag=$circuit_flag" >> "$GITHUB_OUTPUT"
+          fi
           exit $exit_code
 
-      - name: Commit updated DB + log
+      - name: Commit updated DB + log + state file
         id: commit
-        if: steps.fetch.outputs.exit_code == '0'
+        if: always()
         run: |
           git config user.name  "aldi-bot"
           git config user.email "aldi-bot@users.noreply.github.com"
           # aldi.db is tracked; aldi.log is gitignored (force-add to keep history)
-          [ -f aldi.db ]  && git add aldi.db
-          [ -f aldi.log ] && git add -f aldi.log
+          # aldi.state.json tracks circuit-breaker state for email dedup
+          [ -f aldi.db ]           && git add aldi.db
+          [ -f aldi.log ]          && git add -f aldi.log
+          [ -f aldi.state.json ]   && git add -f aldi.state.json
           if git diff --cached --quiet; then
-            echo "No changes — week already in DB."
+            echo "No changes."
             echo "pushed=false" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "auto: fetched new week $(date -u +%Y-%m-%d)"
+            git commit -m "auto: run $(date -u +%Y-%m-%d) (exit=${{ steps.fetch.outputs.exit_code }})"
             git push
             echo "pushed=true" >> "$GITHUB_OUTPUT"
           fi
@@ -295,6 +316,12 @@ jobs:
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
           JOB_STATUS: ${{ job.status }}
           FETCH_RESULT: ${{ steps.fetch.outputs.result }}
+          FETCH_EXIT: ${{ steps.fetch.outputs.exit_code }}
+          ERROR_CATEGORY: ${{ steps.fetch.outputs.error_category }}
+          ERROR_STAGE: ${{ steps.fetch.outputs.error_stage }}
+          ERROR_SIG: ${{ steps.fetch.outputs.error_sig }}
+          NOTIFY_FLAG: ${{ steps.fetch.outputs.notify_flag }}
+          CIRCUIT_FLAG: ${{ steps.fetch.outputs.circuit_flag }}
           START_TIME: ${{ steps.timer.outputs.start }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REPO: ${{ github.repository }}
@@ -303,12 +330,37 @@ jobs:
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - START_TIME))
 
-          # Skip email entirely when the current week has NOT expired yet.
-          # This is the "no spam" path: the cron runs daily, but you only
-          # get an email when there's actually something to report.
+          # ────────────────────────────────────────────────────────────
+          # EMAIL DEDUP / ANTI-SPAM LOGIC
+          # ────────────────────────────────────────────────────────────
+          # 1. Skip email on "not-due" (current week still valid) — no spam.
+          # 2. Skip email on "skipped-existing" (week already in DB) — no spam.
+          # 3. On error: skip if NOTIFY_FLAG=suppress (circuit-open after 3
+          #    consecutive identical errors — state file persists across runs).
+          # 4. ALWAYS send on state transition (success→error OR error→success
+          #    OR error type change) — these are flagged notify.
+          # ────────────────────────────────────────────────────────────
+
           if [ "$FETCH_RESULT" = "not-due" ] && [ "$JOB_STATUS" = "success" ]; then
             echo "📧 Email skipped — current week is still valid (not-due). No spam."
             exit 0
+          fi
+
+          if [ "$FETCH_RESULT" = "skipped-existing" ] && [ "$JOB_STATUS" = "success" ]; then
+            echo "📧 Email skipped — week already in DB. No spam."
+            exit 0
+          fi
+
+          # On error: check the notify flag from the CLI's structured output
+          if [ "$FETCH_EXIT" != "0" ]; then
+            if [ "$NOTIFY_FLAG" = "suppress" ]; then
+              echo "📧 Email skipped — circuit-open after repeated identical errors."
+              echo "   Error signature: $ERROR_SIG"
+              echo "   Consecutive identical errors persisted — suppressing to prevent spam."
+              echo "   A notification will be sent when the error type changes or recovers."
+              exit 0
+            fi
+            echo "📧 Will send error notification (notify_flag=$NOTIFY_FLAG, sig=$ERROR_SIG)"
           fi
 
           # Determine status emoji + label
@@ -329,6 +381,30 @@ jobs:
             *)                RESULT_LABEL="$FETCH_RESULT" ;;
           esac
 
+          # Build error context block if this was an error
+          ERROR_BLOCK=""
+          if [ "$FETCH_EXIT" != "0" ] && [ -n "$ERROR_CATEGORY" ]; then
+            ERROR_BLOCK=$(cat <<ERR
+
+          ─── ERROR DETAILS ────────────────────────────────
+          Category:    $ERROR_CATEGORY
+          Stage:       $ERROR_STAGE
+          Signature:   $ERROR_SIG
+          Circuit:     $CIRCUIT_FLAG
+          Exit code:   $FETCH_EXIT
+
+          Recovery hints:
+          - network:  ALDI site may be down; check https://prospekt.aldi-sued.de/
+          - parse:    ALDI changed their HTML structure; fetch_publication needs updating
+          - storage:  DB file may be locked or disk full; check aldi.db integrity
+          - config:   Check CLI arguments and environment variables
+          - unknown:  Unexpected exception — see traceback in aldi.log
+          ──────────────────────────────────────────────────
+          ERR
+          )
+            ERROR_BLOCK=$(echo "$ERROR_BLOCK" | sed 's/^          //')
+          fi
+
           SUBJECT="ALDI fetch $LABEL: $RESULT_LABEL (${DURATION}s)"
 
           # Read the summary file (generated by the previous step)
@@ -347,6 +423,7 @@ jobs:
           ⏱️  Duration:      ${DURATION}s
           📦 Repository:    $REPO
           🔗 Run URL:       $RUN_URL
+          $ERROR_BLOCK
 
           ─────────────────────────────────────────────────
 
