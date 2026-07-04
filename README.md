@@ -141,16 +141,82 @@ When a new week is fetched and `aldi.db` is committed, the workflow calls a Verc
 
 ```
 aldi-cli/
-├── aldi-cli.py              ← the CLI (single file, ~1700 lines)
+├── aldi-cli.py              ← the CLI (single file, ~1900 lines)
+├── error_handler.py         ← typed exceptions, circuit breaker, retry, state
 ├── requirements.txt         ← just `requests`
 ├── .github/workflows/
 │   ├── daily-fetch.yml      ← production: daily cron + manual dispatch
-│   └── dev-test.yml         ← dev: push trigger + manual, separate DB
+│   └── dev-test.yml         ← dev: push trigger + manual + smoke tests
 ├── aldi.db                  ← the database (committed, grows ~50 KB/week)
 ├── aldi.log                 ← fetch logs
+├── aldi.state.json          ← circuit-breaker state (committed for cross-run dedup)
 ├── LICENSE                  ← MIT
 └── README.md                ← this file
 ```
+
+## Error handling & anti-spam
+
+`error_handler.py` provides a comprehensive error-catching layer:
+
+### Typed exceptions
+
+| Exception          | When                                                  | Exit code | Retryable |
+|--------------------|-------------------------------------------------------|-----------|-----------|
+| `NetworkError`     | HTTP failure, timeout, DNS, 5xx server error          | 10        | Yes (3× with 5s/15s/45s backoff) |
+| `ParseError`       | JSON decode failure, missing config blob, bad HTML    | 20        | No        |
+| `StorageError`     | SQLite write failure, disk full, locked DB            | 30        | No        |
+| `ConfigurationError` | Bad CLI args, missing env vars                      | 40        | No        |
+| `AldiError` (base) | Unknown / unexpected                                   | 50        | No        |
+
+### Circuit breaker (anti-spam)
+
+State is persisted to `aldi.state.json` (next to the DB). After **3 consecutive identical errors** (same category + stage + message), the circuit opens and subsequent identical errors **suppress email notifications**. The circuit closes when:
+- A different error type occurs (resets counter)
+- A run succeeds (clears state, sends recovery email)
+
+This prevents daily email spam if the ALDI site is down for a week.
+
+### Anti-loop guarantees
+
+- `cmd_daemon`: exits after circuit opens → systemd restarts with `RestartSec=60`
+- `retry_network`: max 3 attempts, only for `NetworkError` (5xx/timeout), never for 4xx/parse/storage
+- GitHub Actions: 1 cron run/day, no auto-retry on failure
+- `fetch_publication`: 0 retries for parse/storage errors (they won't fix themselves)
+
+### Email notification rules
+
+| Run status         | Notify? | Reason                                  |
+|--------------------|---------|-----------------------------------------|
+| `fetched` (success)| Yes     | New week available                      |
+| `skipped-existing` | No      | Week already in DB — no news            |
+| `not-due`          | No      | Current week still valid — no news      |
+| Error (first)      | Yes     | New problem — needs attention           |
+| Error (same, ≤3×)  | Yes     | Still failing — gentle reminder         |
+| Error (same, >3×)  | **No**  | Circuit open — suppress duplicate spam  |
+| Error (different)  | Yes     | New error type — reset counter          |
+| Success after error| Yes     | Recovery — confirm the fix worked       |
+
+### Error report format
+
+When an error occurs, the CLI emits both a human-readable report and a machine-readable line for the GHA workflow:
+
+```
+ERROR CATEGORY: network
+ERROR STAGE:    discover_current_url
+EXIT CODE:      10
+RETRYABLE:      True
+MESSAGE:        HTTP 503 fetching landing page https://prospekt.aldi-sued.de/
+
+TRACEBACK:
+  ...
+```
+
+Machine-readable (stderr, parsed by `daily-fetch.yml`):
+```
+error|network|discover_current_url|f3d2948e9b6754d5|notify|circuit-closed
+```
+
+Fields: `error|<category>|<stage>|<signature>|<notify|suppress>|<circuit-open|circuit-closed>`
 
 ## Data sources
 
