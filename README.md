@@ -118,11 +118,7 @@ No email when the current week is still valid (`not-due` status).
 - `RESEND_API_KEY` — free API key from resend.com
 - `NOTIFY_EMAIL` — your email address
 
-### Vercel integration
-
-When a new week is fetched and `discounts.db` is committed, the workflow calls a Vercel deploy hook that triggers the [discount-database](https://github.com/BirdNest055/discount-database) app to rebuild. The web app downloads the latest `discounts.db` during its build step.
-
-**Secret:** `VERCEL_DEPLOY_HOOK` — the Vercel deploy hook URL
+> **Note:** The Vercel deploy hook integration was removed in v2.3.0+ because `discount-database` now reads directly from Supabase (populated by the `discount-map` fetch endpoints) instead of bundling `discounts.db` at build time. The CLI still commits `discounts.db` to this repo for historical/timeline analysis.
 
 ## Dev / Prod branches
 
