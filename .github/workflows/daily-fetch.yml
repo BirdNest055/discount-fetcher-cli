@@ -126,19 +126,11 @@ jobs:
             echo "pushed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Trigger discount-database rebuild on Vercel
-        if: steps.commit.outputs.pushed == 'true' && env.VERCEL_DEPLOY_HOOK != ''
-        env:
-          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
-        run: |
-          echo "🔄 Triggering discount-database rebuild on Vercel (DB was updated)..."
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$VERCEL_DEPLOY_HOOK")
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
-            echo "   ✅ Vercel rebuild triggered"
-          else
-            echo "   ⚠️  Vercel hook returned HTTP $HTTP_CODE (non-fatal)"
-          fi
+      # NOTE: The Vercel deploy hook step was removed in v2.3.0+ because
+      # discount-database no longer bundles aldi.db at build time — it reads
+      # from Supabase directly. The CLI still commits discounts.db to this
+      # repo for historical/timeline analysis, but the web app doesn't need
+      # a rebuild when the DB updates.
 
       - name: Generate DB summary
         id: summary
