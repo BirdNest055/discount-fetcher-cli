@@ -157,3 +157,28 @@
 [2026-08-07 13:16:33 +0000] NOT DUE — latest pub 'kw32-26-op' (03.08. – 08.08.2026) is valid until 2026-08-08. Today is 2026-08-07. Will fetch after expiry.
 [2026-08-08 13:00:16 +0000] Mode: expiry
 [2026-08-08 13:00:16 +0000] NOT DUE — latest pub 'kw32-26-op' (03.08. – 08.08.2026) is valid until 2026-08-08. Today is 2026-08-08. Will fetch after expiry.
+[2026-08-09 13:03:09 +0000] Mode: expiry
+[2026-08-09 13:03:09 +0000] DUE — latest pub 'kw32-26-op' (03.08. – 08.08.2026) expired on 2026-08-08. Today is 2026-08-09. Checking for new week...
+[2026-08-09 13:03:09 +0000] Resolving current prospectus URL...
+[2026-08-09 13:03:10 +0000] Current URL: https://prospekt.aldi-sued.de/kw35-26-vop/
+[2026-08-09 13:03:10 +0000] Peeking publication id (lightweight HTML fetch)...
+[2026-08-09 13:03:10 +0000] Discovered: pub_id=3291481  slug=kw35-26-vop
+[2026-08-09 13:03:10 +0000] NEW week detected — fetching https://prospekt.aldi-sued.de/kw35-26-vop/
+[2026-08-09 13:03:10 +0000]   Fetching page: https://prospekt.aldi-sued.de/kw35-26-vop/page/1
+[2026-08-09 13:03:10 +0000]   Fetching spreads: https://prospekt.aldi-sued.de/kw35-26-vop/spreads.json?version=MjNjZGY4ZGYxZmM5ZjE5NmMwZjRjNTQ1NWVkODdiNDdiZDk0M2Q4Yg==&page=1
+[2026-08-09 13:03:10 +0000]   Publication has 23 pages -> 12 spreads
+[2026-08-09 13:03:10 +0000]     [1/12] spread 1
+[2026-08-09 13:03:10 +0000]     [2/12] spread 2-3
+[2026-08-09 13:03:10 +0000]     [3/12] spread 4-5
+[2026-08-09 13:03:11 +0000]     [4/12] spread 6-7
+[2026-08-09 13:03:11 +0000]     [5/12] spread 8-9
+[2026-08-09 13:03:11 +0000]     [6/12] spread 10-11
+[2026-08-09 13:03:11 +0000]     [7/12] spread 12-13
+[2026-08-09 13:03:11 +0000]     [8/12] spread 14-15
+[2026-08-09 13:03:11 +0000]     [9/12] spread 16-17
+[2026-08-09 13:03:11 +0000]     [10/12] spread 18-19
+[2026-08-09 13:03:11 +0000]     [11/12] spread 20-21
+[2026-08-09 13:03:11 +0000]     [12/12] spread 22-23
+[2026-08-09 13:03:12 +0000]   Writing to DB: discounts.db
+[2026-08-09 13:03:12 +0000]   Commit complete.
+[2026-08-09 13:03:12 +0000] OK — fetched 0 offerings, 0 new products
