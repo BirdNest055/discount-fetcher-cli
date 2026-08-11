@@ -184,3 +184,5 @@
 [2026-08-09 13:03:12 +0000] OK — fetched 0 offerings, 0 new products
 [2026-08-10 13:21:40 +0000] Mode: expiry
 [2026-08-10 13:21:40 +0000] NOT DUE — latest pub 'kw35-26-vop' (24.08. – 29.08.2026) is valid until 2026-08-29. Today is 2026-08-10. Will fetch after expiry.
+[2026-08-11 13:18:26 +0000] Mode: expiry
+[2026-08-11 13:18:26 +0000] NOT DUE — latest pub 'kw35-26-vop' (24.08. – 29.08.2026) is valid until 2026-08-29. Today is 2026-08-11. Will fetch after expiry.
