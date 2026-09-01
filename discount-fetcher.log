@@ -254,3 +254,5 @@
 [2026-08-30 16:28:59 +0000] OK — fetched 2 offerings, 2 new products
 [2026-08-31 19:01:03 +0000] Mode: expiry
 [2026-08-31 19:01:03 +0000] NOT DUE — latest pub 'kw37-26-op' (07.09. – 12.09.2026) is valid until 2026-09-12. Today is 2026-08-31. Will fetch after expiry.
+[2026-09-01 16:24:57 +0000] Mode: expiry
+[2026-09-01 16:24:57 +0000] NOT DUE — latest pub 'kw37-26-op' (07.09. – 12.09.2026) is valid until 2026-09-12. Today is 2026-09-01. Will fetch after expiry.
