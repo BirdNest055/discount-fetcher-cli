@@ -464,3 +464,35 @@
 [2026-11-06 19:09:45 +0000] NOT DUE — latest pub 'kw45-26-vop' (02.11. – 07.11.2026) is valid until 2026-11-07. Today is 2026-11-06. Will fetch after expiry.
 [2026-11-07 17:39:54 +0000] Mode: expiry
 [2026-11-07 17:39:54 +0000] NOT DUE — latest pub 'kw45-26-vop' (02.11. – 07.11.2026) is valid until 2026-11-07. Today is 2026-11-07. Will fetch after expiry.
+[2026-11-08 17:49:39 +0000] Mode: expiry
+[2026-11-08 17:49:39 +0000] DUE — latest pub 'kw45-26-vop' (02.11. – 07.11.2026) expired on 2026-11-07. Today is 2026-11-08. Checking for new week...
+[2026-11-08 17:49:39 +0000] Resolving current prospectus URL...
+[2026-11-08 17:49:39 +0000] Current URL: https://prospekt.aldi-sued.de/kw47-26-op/
+[2026-11-08 17:49:39 +0000] Peeking publication id (lightweight HTML fetch)...
+[2026-11-08 17:49:39 +0000] Discovered: pub_id=3500072  slug=kw47-26-op
+[2026-11-08 17:49:39 +0000] NEW week detected — fetching https://prospekt.aldi-sued.de/kw47-26-op/
+[2026-11-08 17:49:39 +0000]   Fetching page: https://prospekt.aldi-sued.de/kw47-26-op/page/1
+[2026-11-08 17:49:40 +0000]   Fetching spreads: https://prospekt.aldi-sued.de/kw47-26-op/spreads.json?version=YzQ1YTNhMDlkOTE5NDkxZDQxZGMxMzc5NzhmZDg2YjVkYjk1OWEzYg==&page=1
+[2026-11-08 17:49:40 +0000]   Publication has 37 pages -> 19 spreads
+[2026-11-08 17:49:40 +0000]     [1/19] spread 1
+[2026-11-08 17:49:40 +0000]     [2/19] spread 2-3
+[2026-11-08 17:49:40 +0000]     [3/19] spread 4-5
+[2026-11-08 17:49:40 +0000]     [4/19] spread 6-7
+[2026-11-08 17:49:41 +0000]     [5/19] spread 8-9
+[2026-11-08 17:49:41 +0000]     [6/19] spread 10-11
+[2026-11-08 17:49:41 +0000]     [7/19] spread 12-13
+[2026-11-08 17:49:41 +0000]     [8/19] spread 14-15
+[2026-11-08 17:49:41 +0000]     [9/19] spread 16-17
+[2026-11-08 17:49:41 +0000]     [10/19] spread 18-19
+[2026-11-08 17:49:41 +0000]     [11/19] spread 20-21
+[2026-11-08 17:49:41 +0000]     [12/19] spread 22-23
+[2026-11-08 17:49:41 +0000]     [13/19] spread 24-25
+[2026-11-08 17:49:41 +0000]     [14/19] spread 26-27
+[2026-11-08 17:49:41 +0000]     [15/19] spread 28-29
+[2026-11-08 17:49:41 +0000]     [16/19] spread 30-31
+[2026-11-08 17:49:41 +0000]     [17/19] spread 32-33
+[2026-11-08 17:49:41 +0000]     [18/19] spread 34-35
+[2026-11-08 17:49:41 +0000]     [19/19] spread 36-37
+[2026-11-08 17:49:41 +0000]   Writing to DB: discounts.db
+[2026-11-08 17:49:41 +0000]   Commit complete.
+[2026-11-08 17:49:41 +0000] OK — fetched 2 offerings, 2 new products
