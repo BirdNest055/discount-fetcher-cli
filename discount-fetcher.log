@@ -496,3 +496,5 @@
 [2026-11-08 17:49:41 +0000]   Writing to DB: discounts.db
 [2026-11-08 17:49:41 +0000]   Commit complete.
 [2026-11-08 17:49:41 +0000] OK — fetched 2 offerings, 2 new products
+[2026-11-09 22:10:12 +0000] Mode: expiry
+[2026-11-09 22:10:12 +0000] NOT DUE — latest pub 'kw47-26-op' (16.11. – 21.11.2026) is valid until 2026-11-21. Today is 2026-11-09. Will fetch after expiry.
