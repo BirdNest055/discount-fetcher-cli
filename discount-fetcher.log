@@ -549,3 +549,5 @@
 [2026-11-22 19:19:30 +0000]   Writing to DB: discounts.db
 [2026-11-22 19:19:30 +0000]   Commit complete.
 [2026-11-22 19:19:30 +0000] OK — fetched 0 offerings, 0 new products
+[2026-11-23 23:40:57 +0000] Mode: expiry
+[2026-11-23 23:40:57 +0000] NOT DUE — latest pub 'kw50-26-vop' (07.12. – 12.12.2026) is valid until 2026-12-12. Today is 2026-11-23. Will fetch after expiry.

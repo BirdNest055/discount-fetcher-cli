@@ -1,12 +1,12 @@
 {
-  "last_run_at": "2026-11-22T19:19:30.591568+00:00",
-  "last_status": "success",
+  "last_run_at": "2026-11-23T23:40:57.473556+00:00",
+  "last_status": "not-due",
   "last_error_signature": null,
   "last_error_category": null,
   "last_error_stage": null,
   "last_error_message": null,
   "consecutive_errors": 0,
-  "total_runs": 143,
+  "total_runs": 144,
   "total_errors": 0,
   "last_notification_at": null,
   "last_notification_signature": null
